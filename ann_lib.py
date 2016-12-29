@@ -3,117 +3,176 @@ import matplotlib.pylab as plt
 import random
 
 
+class Activation_Func(object):
+    @staticmethod
+    def sigmoid_func(weighted_sum):
+        return 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+
+    @staticmethod
+    def sigmoid_derivative(weighted_sum):
+        tmp = 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+        return tmp * (1 - tmp)
+
+    @staticmethod
+    def relu_func(weighted_sum):
+        return np.max([0, weighted_sum])
+
+    @staticmethod
+    def relu_derivative(weighted_sum):
+        return int(weighted_sum > 0)
+
+    @staticmethod
+    def huber_func(weighted_sum):
+        pass
+
+
+class Cost_Func(object):
+    @staticmethod
+    def cross_entropy(prediction_vec, y_vec):
+        error_vec = y_vec * np.log(prediction_vec) + (1 - y_vec) * np.log(1 - prediction_vec)
+        return np.dot(error_vec, error_vec)
+
+
+class Network(object):
+    def __init__(self, network_size, normalize=True,
+                 activation_func=Activation_Func.sigmoid_func,
+                 derivative_func=Activation_Func.sigmoid_derivative):
+        """
+        initialize the network with random weights
+        :param network_size: a list specify the number of neurons in each layer. doesn't include the extra neuron for bias.\n
+        :param normalize: whether normalize the weight to prevent "saturation".
+        """
+        self.size = network_size
+        self.num_neuron_layer = len(network_size) - 1 # excluding input layer
+        self._weight_matrix_list = self._weight_initialize(normalize)
+        self.activation_func = activation_func
+        self.derivative_func = derivative_func
+
+    def _weight_initialize(self, normalize):
+        weight_matrix_list = []
+        if normalize:
+            for iii in xrange(self.num_neuron_layer):
+                weight_matrix = np.random.randn(self.size[iii+1]+1, self.size[iii]+1) / np.sqrt(self.size[iii])
+                weight_matrix_list.append(weight_matrix)
+        else:
+            for iii in xrange(self.num_neuron_layer):
+                # add 1 dimension to include bias
+                weight_matrix = np.random.randn(self.size[iii+1]+1, self.size[iii]+1)
+                weight_matrix_list.append(weight_matrix)
+        return weight_matrix_list
+
+    def _forward_pass(self, input_matrix):
+        """
+        calculate the activations for all neurons over all training examples.\n
+        :param input_matrix: 2D numpy array, p * n, p is the dimension of input data, n: number of training examples. \n
+        :return: list of activations at each layer.\n
+            e.g., the first matrix in the list is the activations of neurons in the first layer from n training examples. \n
+        """
+        # add a constant 1 to the input matrix to include the bias in the weight matrix
+        input_matrix = np.vstack((input_matrix, np.ones(input_matrix.shape[1])))
+        weighted_sums_list = []
+        derivative_matrix_list = []
+        activation_matrix_list = [input_matrix]
+        for iii in xrange(self.num_neuron_layer):
+            # linear weighted sums: z
+            weighted_sums = np.dot(self._weight_matrix_list[iii], input_matrix)
+            weighted_sums_list.append(weighted_sums)
+            # non-linear activations
+            activation_matrix = np.array(self.activation_func(weighted_sums))
+            activation_matrix[-1] = 1 # change the last row to 1, it's for bias
+            input_matrix = activation_matrix
+            activation_matrix_list.append(input_matrix)
+            # derivatives
+            derivative_matrix = np.array(self.derivative_func(weighted_sums))
+            derivative_matrix[-1] = 0 # bias terms shouldn't contribute to the back-propagated errors
+            derivative_matrix_list.append(derivative_matrix)
+
+        return activation_matrix_list, derivative_matrix_list
+
+    def _output_errors(self, output_activation_matrix, y_matrix, output_derivative_matrix):
+        output_error_matrix = (y_matrix / output_activation_matrix[:-1, :] -
+                               (1 - y_matrix) / (1 - output_activation_matrix[:-1, :])) * output_derivative_matrix[:-1, :]
+        output_error_matrix = np.vstack((output_error_matrix, np.zeros(y_matrix.shape[1])))
+        return output_error_matrix
+
+    def _back_propagation(self, output_error_matrix, derivative_matrix_list):
+        error_matrix_list = [0] * self.num_neuron_layer
+        error_matrix_list[self.num_neuron_layer-1] = output_error_matrix # the last item in the list output error matrix
+        for iii in xrange(self.num_neuron_layer-2, -1, -1):
+            weight_matrix = self._weight_matrix_list[iii+1]
+            error_matrix = np.dot(weight_matrix.T, output_error_matrix) * derivative_matrix_list[iii]
+            output_error_matrix = error_matrix
+            error_matrix_list[iii] = error_matrix
+        return error_matrix_list
+
+    def _weight_update(self, error_matrix_list, activation_matrix_list, learning_rate, regularization_strength):
+        for iii in xrange(len(error_matrix_list)):
+            error_matrix = error_matrix_list[iii]
+            activation_matrix = activation_matrix_list[iii]
+            # delta_weight_matrix = np.dot(error_matrix.T[:, :, np.newaxis], activation_matrix.T[:, np.newaxis, :])
+            sum_delta_weights = np.zeros((error_matrix.shape[0], activation_matrix.shape[0]))
+            for jjj in xrange(error_matrix.shape[1]):
+                sum_delta_weights += np.dot(error_matrix[:, jjj][:, np.newaxis], activation_matrix[:, jjj][np.newaxis, :])
+            avg_delta_weights = sum_delta_weights / error_matrix.shape[1]
+            self._weight_matrix_list[iii] = self._weight_matrix_list[iii] - learning_rate * avg_delta_weights - \
+                                             learning_rate * regularization_strength * self._weight_matrix_list[iii]
+
+    def mini_batch_SGD(self, training_data, batch_size, learning_rate, regularization_strength, num_iteration):
+        for idx in xrange(0, num_iteration):
+            random.shuffle(training_data) # in place shuffle
+            mini_batches = [training_data[k:k+batch_size] for k in xrange(0, len(training_data), batch_size)]
+            for mini_batch in mini_batches:
+                input_matrix = []
+                y_matrix = []
+                for input_vec, y_vec in mini_batch: # convert input data to desirable format
+                    input_matrix.append(input_vec.squeeze())
+                    y_matrix.append(y_vec.squeeze())
+                input_matrix = np.array(input_matrix).T
+                y_matrix = np.array(y_matrix).T
+                activation_matrix_list, derivative_matrix_list = self._forward_pass(input_matrix)
+                output_activation_matrix = activation_matrix_list[-1]
+                output_derivative_matrix = derivative_matrix_list[-1]
+                output_error_matrix = self._output_errors(output_activation_matrix, y_matrix, output_derivative_matrix)
+                error_matrix_list = self._back_propagation(output_error_matrix, derivative_matrix_list)
+                self._weight_update(error_matrix_list, activation_matrix_list, learning_rate, regularization_strength)
+            print "Iteration = %d, accuracy = %f\n" % (idx+1, self.accuracy(training_data))
+
+    def predict(self, vectorized_digit):
+        input_activation = np.append(vectorized_digit, [1]) # append a 1 to the end of vectorized input
+        for iii in xrange(self.num_neuron_layer):
+            tmp_weighted_sum = np.dot(self._weight_matrix_list[iii], input_activation)
+            input_activation = self.activation_func(tmp_weighted_sum)
+        return np.argmax(input_activation[:-1]), input_activation
+
+    def accuracy(self, test_data):
+        correct_count = 0
+        for item in test_data:
+            input_vec, y_vec = item
+            prediction, _ = self.predict(input_vec)
+            correct_count += prediction == np.argmax(y_vec)
+        return correct_count * 1.0 / len(test_data)
+
+    def load_weights(self, weights_list):
+        for idx, weights in enumerate(weights_list):
+            self._weight_matrix_list[idx] = weights
+
+    def save_weights(self, filename):
+        weights_dict = {}
+        for idx, weights in enumerate(self._weight_matrix_list):
+            weights_dict[idx] = weights
+        np.savez_compressed(filename, weights_dict)
+
+
+
 def digit_visualize(data_vector):
     """
     visualize the digit image
-    :param data_vector: 
-    :return: 
+    :param data_vector:
+    :return:
     """
     pixels = int(np.sqrt(len(data_vector)))
     plt.figure()
     plt.pcolormesh(np.reshape(data_vector, (pixels, pixels)), cmap="gray")
     plt.gca().invert_yaxis()
-
-
-class Network(object):
-    def __init__(self, network_size):
-        """
-        initialize the network
-        :param network_size: a list specify # of neurons in each layer, from input to output layer \n
-        weights: a list of matrix for each layer, excluding input layer \n
-            for weight matrix of layer (l+1), each row specifies connection weights from neurons in previous layer(l), \
-            including weight for bias (the last column)
-        """
-        self.num_layer = len(network_size)
-        self.weights = []
-        for iii in xrange(self.num_layer - 1):
-            weight_matrix = np.random.randn(network_size[iii+1]+1, network_size[iii]+1) # augment the weight matrix to include weight for bias
-            self.weights.append(weight_matrix)
-
-    def __activation_func(self, weighted_sum):
-        """
-        activation function: e.g., sigmoid function;
-        :param weighted_sum: the weighted sum from previous layer
-        :return: activation
-        """
-        return 1.0 / (1 + np.exp(-1.0 * weighted_sum))
-
-    def __activation_derivative(self, weighted_sum):
-        tmp = self.__activation_func(weighted_sum)
-        return (1 - tmp) * tmp
-
-    def __forward_pass(self, vectorized_digit, label):
-        weighted_sums = []
-        derivatives = [] # the derivative of activation with respect to input for each neuron
-        input_activation = np.append(vectorized_digit, [1]) # append a 1 to the end of vectorized input
-        activations = [input_activation]
-        for iii in xrange(self.num_layer-1):
-            tmp_weighted_sum = np.dot(self.weights[iii], input_activation)
-            weighted_sums.append(tmp_weighted_sum)
-            input_activation = np.array(self.__activation_func(tmp_weighted_sum))
-            input_activation[-1] = 1
-            activations.append(input_activation)
-            neuron_derivative = np.array(self.__activation_derivative(input_activation))
-            neuron_derivative[-1] = 0 # the fictive neuron has activation 0 and derivative 0
-            derivatives.append(neuron_derivative)
-        output_errors = (input_activation - np.append(label, [1])) * neuron_derivative #
-        return activations, derivatives, output_errors
-
-    def __back_propagation(self, vectorized_digit, label):
-        activations, derivatives, output_errors = self.__forward_pass(vectorized_digit, label)
-        errors = [0] * (self.num_layer - 1)
-        errors[-1] = output_errors
-        for iii in xrange(self.num_layer-3, -1, -1):
-            post_error = errors[iii+1]
-            pre_error = np.dot(post_error, self.weights[iii+1]) * derivatives[iii]
-            errors[iii] = pre_error
-        return errors, activations
-
-    def __weight_changes(self, vectorized_digit, label):
-        errors, activations = self.__back_propagation(vectorized_digit, label)
-        weight_changes = []
-        for iii in xrange(self.num_layer-1):
-            tmp_change = np.dot(errors[iii][:, np.newaxis], activations[iii][np.newaxis, :])
-            weight_changes.append(tmp_change)
-        return weight_changes
-
-    def __weight_update(self, training_data, batch_size, learning_rate):
-        idx_list = np.random.choice(len(training_data), batch_size, replace=False)
-        weight_change_list = []
-        for idx in idx_list:
-            input_vec, label = training_data[idx]
-            weight_change_list.append(self.__weight_changes(input_vec, label))
-        # print weight_change_list[1]
-        for iii in xrange(self.num_layer-1):
-            weight_change = []
-            for jjj in xrange(len(weight_change_list)):
-                weight_change.append(weight_change_list[jjj][iii])
-            weight_change = np.sum(weight_change, axis=0)
-            self.weights[iii] -= weight_change * learning_rate
-
-    def mini_batch_SGD(self, training_data, test_data, batch_size, learning_rate=0.1, num_iteration=30):
-        for idx in xrange(0, num_iteration+1):
-            random.shuffle(training_data) # in place shuffle
-            mini_batches = [training_data[k:k+batch_size] for k in xrange(0, len(training_data), batch_size)]
-            for mini_batch in mini_batches:
-                self.__weight_update(mini_batch, batch_size, learning_rate)
-            if idx % 2 == 0:
-                print "The current accuracy is: %f" % self.accuracy(test_data)
-
-    def accuracy(self, test_data):
-        correct_count = 0
-        for item in test_data:
-            input_vec, label = item
-            prediction = self.predict(input_vec)
-            correct_count += prediction == label
-        return correct_count * 1.0 / len(test_data)
-
-    def predict(self, vectorized_digit):
-        input_activation = np.append(vectorized_digit, [1]) # append a 1 to the end of vectorized input
-        for iii in xrange(self.num_layer-1):
-            tmp_weighted_sum = np.dot(self.weights[iii], input_activation)
-            input_activation = self.__activation_func(tmp_weighted_sum)
-        return np.argmax(input_activation[:-1])
-
 
 
