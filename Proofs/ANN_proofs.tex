@@ -1,0 +1,146 @@
+\documentclass{extarticle}
+\usepackage[letterpaper, portrait, margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{amsthm} % theorem package
+\usepackage[utf8]{inputenc}
+\usepackage{amsthm}
+\usepackage[english]{babel}
+\theoremstyle{definition}
+\newtheorem{theorem}{Theorem}[section]
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section] % define definition
+
+%\newcommand{\mdvec}[1]{\vec{#1}}
+\newcommand{\mdvec}[1]{\underset{^\sim}#1} % vector notation with tilde
+% $\mathop x\limits_ \sim$ % a different implementation of under tilde
+\newcommand{\mdmat}[1]{\boldsymbol{\MakeUppercase{#1}}} % matrix notation, automatically bold and uppercase
+\newcommand{\dv}[2]{\frac{d}{d#2}{#1}} % derivative notation
+\newcommand{\pv}[2]{\frac{\partial}{\partial #2}{(#1)}} % partial derivative
+\newcommand{\grd}{\bigtriangledown} % gradient notation
+\newcommand{\tvec}[1]{\vec{#1}^t} % transposed vector
+\newcommand{\inlm}[1]{$#1$} % short-hand for inline math
+\newcommand{\vnorm}[1]{||\vec{#1}||}
+
+
+
+\begin{document}
+\title{Back-propagation Tutorial}
+\author{Mingwen Dong}
+\maketitle
+%\newpage
+
+\section{Backpropagation}
+Notations:
+\begin{enumerate}
+	\item $z_i^l$: weighted linear (sum) input to $i^{th}$ neuron in layer $(l)$.
+	\item $a_i^l$: activation/output from $i^{th}$ neuron in layer $(l)$. $$ a^l_i = g(z^l_i) $$
+		 $g(\cdot)$ is the activation function. e.g., sigmoid function $g(x) = \frac{1}{1 + e^{-x}}$, $tanh(\cdot)$, or ReLU.\\
+		 Note: activation function could be other form like Huber's function.
+	\item $w_{ji}^l$: connection strength/weight from $i^{th}$ neuron in layer $(l-1)$ to $j^{th}$ neuron in layer $(l)$.
+			$$ z_j^{l+1} = \sum_{i=0}^{n} w_{ji}^{l+1} a_i^l $$
+			$$ \frac{\partial z_j^{l+1}}{\partial z_i^l} = \frac{\partial z_j^{l+1}}{\partial a_i^l} \frac{\partial a_i^l}{\partial z_i^l} = w_{ji}^{l+1} g'(z_i^l) $$
+			Notice: the bias is included by adding a constant input "1" to every neuron in the network.
+	\item $L$: the output layer.
+	\item $C$: the cost. e.g., quadratic cost function, cross-entropy, or likelihood cost function.
+			$$\frac{1}{2}\sum_{i=0}^{n}(a_i^L - y_i)^2$$
+			$i = 0, 1, 2, ..., n$, indicate different output units/neurons.\\
+			In stochastic gradient descent, the cost is also summed over different input $x$.
+	\item $\delta_i^l$: derivative of the cost $C$ with respect to each neuron's linear input $z_i^l$
+			$$ \delta_i^l = \frac{\partial C}{\partial z_i^L}  $$
+\end{enumerate}
+\subsection{Feed\_Forward}
+The weighted input to neurons in layer $(l)$ is:
+\begin{align*}
+	z_j^l = \sum_{i=0}^{n} a_i^{l-1} w_{ji}^l \quad \Rightarrow \quad \mdvec{z^l} = \mdmat{w}^l \cdot \mdvec{a^{l-1}}
+\end{align*}
+where, $\mdmat{w}^l$ is the weight matrix for neurons in layer $(l)$. "tilde" indicate a vector variable.\\
+The corresponding activations from these neurons are:
+\begin{align*}
+	\mdvec{a^l} = g(\mdvec{z^l})
+\end{align*}
+The derivative of $a_i^l$ with respect to $z_i^l$ can be calculated during this forward pass process:
+\begin{align*}
+	\frac{\partial a_i^l}{\partial z_i^l} = g'(z_i^l) = \begin{cases}
+		g(z_i^l) [1 - g(z_i^l)] & \text{sigmoid activation function}\\
+		1 & \text{if } z_i^l > 0 \quad \text{otherwise 0}
+	\end{cases}
+\end{align*}
+
+\subsection{Errors at output layer}
+Define cost-function as cross-entropy:
+\begin{align*}
+	C = \sum_{i=0}^{n} \bigg[y_i ln(a_i^L) + (1 - y_i) ln(1 - a_i^L)\bigg] && i = 0, 1, ..., n \; \text{indicate different neurons in the output layer}
+\end{align*}
+Errors at the output layer (one could treat cost as another neuron where all output neurons converge to):
+\begin{align*}
+	\delta_i^L \equiv \frac{\partial C}{\partial z_i^L} &= \frac{\partial C}{\partial a_i^L} \frac{\partial a_i^L}{\partial z_i^L}
+	= \bigg[\frac{y_i}{a_i^L} - \frac{1 - y_i}{1 - a_i^L}\bigg] \odot g'(z_i^L) && \text{$\odot$: pointwise multiplication}
+\end{align*}
+
+\subsection{Back-propagate errors from output layer to hidden layers}
+Proof for the back-propagation algorithm using Dynamic Programming.\\
+Using multivariate chain rule, we have:
+\begin{align*}
+	\delta_c^l &= \frac{\partial C}{\partial z_c^l} \quad  \text{sum over all possible product sequences from layer $(l+1)$ to output layer $(L)$}\\
+			   &= \sum_{i, j, k, m, ...} \frac{\partial C}{\partial z_m^L} \frac{\partial z_m^{L}}{\partial z_k^{L-1}} \cdots \frac{\partial z_k^{l+3}}{\partial z_j^{l+2}} \frac{\partial z_j^{l+2}}{\partial z_i^{l+1}} \frac{\partial z_i^{l+1}}{\partial z_c^l}\\
+			   &= \sum_i \frac{\partial z_i^{l+1}}{\partial z_c^l} \cdot \sum_{j, k, m, ...} \frac{\partial C}{\partial z_m^L} \frac{\partial z_m^{L}}{\partial z_k^{L-1}} \cdots \frac{\partial z_k^{l+3}}{\partial z_j^{l+2}} \frac{\partial z_j^{l+2}}{\partial z_i^{l+1}}\\
+			   &= \sum_i \frac{\partial z_i^{l+1}}{\partial z_c^l} \cdot \delta_i^{l+1}\\
+			   &= \frac{\partial a_c^l}{\partial z_c^l} \sum_i \frac{\partial z_i^{l+1}}{\partial a_c^l} \cdot \delta_i^{l+1}\\
+			   &= g'(z_c^l) \sum_i w_{ic}^{l+1} \cdot \delta_i^{l+1}\\
+			   &= g'(z_c^l) \bigg\{ \big[\mdvec{w_{\cdot c}^{l+1}}\big]^T \cdot \delta_i^{l+1}  \bigg\} \quad \quad \mdvec{w_{\cdot c}^{l+1}} \text{: $c^{th}$ column of weight matrix $\mdmat{W}^{l+1}$}
+\end{align*}
+This leads to an recursion and in the output layer, we have:
+$$ \delta_i^L \equiv \frac{\partial C}{\partial z_i^L} = \bigg[\frac{y_i}{a_i^L} - \frac{1 - y_i}{1 - a_i^L}\bigg] $$
+Write in vectorized computation:
+\begin{align*}
+	\mdvec{\delta^l} &= g'(\mdvec{z^l}) \odot \bigg\{ \big[\mdmat{w}^{l+1}\big]^T \cdot \mdvec{\delta^{l+1}} \bigg\}
+\end{align*}
+If we rewrite the recursion as a loop starting from the base case, it's the \textbf{back-propagation algorithm}. Intuitively, we could think the errors at the output layer as a new "input" $(\mdvec{\delta^L})$, the errors at the hidden layer are obtained by backwards multiplying $(\mdvec{\delta^L})$ with transposed weight matrix $\big[\mdvec{w_{\cdot c}^{l+1}}\big]^T$ and then scaled with the neuron-specific derivatives. To some extent, this calculation is even simpler either than the feed-forward pass as the calculation only involves elementwise multiplication (assuming derivative is already calculated in the feed-forward process).
+
+\subsection{Weight update}
+From the computation above, we know:
+\begin{align*}
+	\frac{\partial C}{\partial w_{ji}^l} &= \frac{\partial C}{\partial z_j^l} \cdot \frac{\partial z_j^l}{\partial w_{ji}^l}\\
+		&= \delta_j^l \cdot a_i^{l-1}
+\end{align*}
+Write in vectorized form:
+\begin{align*}
+	\quad & \quad \frac{\partial C}{\partial \mdvec{w_{j\cdot}}^l} = \delta_j^l \cdot \mdvec{a^{l-1}}\\
+	\Rightarrow & \quad \frac{\partial C}{\partial \mdmat{w}^l} = \mdvec{\delta^l} \cdot \big[\mdvec{a^{l-1}}\big]^T
+\end{align*}
+If learning rate is $\eta$, the new $\mdmat{w}^l$ should be:
+\begin{align*}
+	\mdmat{w}^l \leftarrow \mdmat{w}^l - \eta \cdot \frac{\partial C}{\partial \mdmat{w}^l} = \mdmat{w}^l - \eta \cdot \mdvec{\delta^l} \cdot \big[\mdvec{a^{l-1}}\big]^T
+\end{align*}
+
+\subsection{Stochastic gradient descent}
+Forward pass:
+\begin{enumerate}
+	\item $\mdmat{x}$: input matrix, dimension is $m \times n$ (n examples each with m features), each column indicates one example.
+	\item $\mdmat{w}$: weight matrix, dimension is $p \times m$ (receives from m inputs, output p linear sum).
+	\item $\mdmat{z} = \mdmat{w} \cdot \mdmat{x}$: output matrix, dimension is $p \times n$.
+\end{enumerate}
+Backward pass:
+\begin{enumerate}
+	\item $\mdmat{\delta}^L$: error matrix at the output layer, dimension is $p \times n$, each column indicates output error from one example.
+	\item $\mdmat{w}$: weight matrix, dimension is $p \times m$, each row indicates the connection from one input neuron to $p$ output neuron.
+	\item $\mdmat{\delta}^l$:, error matrix at the hidden layer, dimension is $m \times n$, each column indicates the errors at hidden layer $(l)$ from one example.
+\end{enumerate}
+
+\section{Regularization}
+For L2 regularization (assume the regularization strength is $\lambda$), the cost function (cross-entropy) is:
+\begin{align*}
+	C &= \sum_{i=0}^{p}\bigg[y_i ln(a_i^L) + (1 - y_i) ln(1 - a_i^L)\bigg] + \frac{\lambda}{2} \sum_{i, j, l} \big[w_{ij}^l\big]^2 && \text{all weights in the network}\\
+	\frac{\partial}{\partial w_{ij}^l} \bigg\{ \frac{1}{2} \sum_{i, j, l} \big[w_{ij}^l\big]^2 \bigg\} &= w_{ij}^l
+\end{align*}
+The derivative from regularization term is directly related to each weight and doesn't need back-propagation. For stochastic gradient descent, the update rule becomes (the regularization term is scaled again by the size of training set $n$):
+\begin{align*}
+	\mdmat{w}^l \leftarrow \mdmat{w}^l - \frac{ \eta \lambda}{n} \mdmat{W}^l - \eta \cdot \frac{\partial C}{\partial \mdmat{w}^l} = \mdmat{w}^l - \frac{ \eta \lambda}{n} \mdmat{W}^l - \eta \cdot \mdvec{\delta^l} \cdot \big[\mdvec{a^{l-1}}\big]^T
+\end{align*}
+
+
+
+\end{document}

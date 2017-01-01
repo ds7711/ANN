@@ -6,6 +6,8 @@
 
 ## ignore txt files
 *.txt
+*.npz
+*.md
 
 
 ## ignore Ipython notebook ipynb Temporary data

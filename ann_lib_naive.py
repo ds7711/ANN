@@ -53,7 +53,8 @@ class Network(object):
             input_activation = np.array(self.__activation_func(tmp_weighted_sum))
             input_activation[-1] = 1
             activations.append(input_activation)
-            neuron_derivative = np.array(self.__activation_derivative(input_activation))
+            # neuron_derivative = np.array(self.__activation_derivative(input_activation))
+            neuron_derivative = np.array(self.__activation_derivative(tmp_weighted_sum))
             neuron_derivative[-1] = 0 # the fictive neuron has activation 0 and derivative 0
             derivatives.append(neuron_derivative)
         output_errors = (input_activation - np.append(label, [1])) * neuron_derivative #

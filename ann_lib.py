@@ -14,17 +14,39 @@ class Activation_Func(object):
         return tmp * (1 - tmp)
 
     @staticmethod
-    def relu_func(weighted_sum):
-        return np.max([0, weighted_sum])
+    def relu_func(weighted_sum, leaky_factor=0.05):
+        return np.abs(np.clip(((weighted_sum > 0) + (weighted_sum <= 0) * leaky_factor) * weighted_sum, -2, 2)) # for matrix relu
 
     @staticmethod
-    def relu_derivative(weighted_sum):
-        return int(weighted_sum > 0)
+    def relu_derivative(weighted_sum, leaky_factor=0.05):
+        return np.array(weighted_sum > 0, dtype=float) + (weighted_sum <= 0) * leaky_factor # for matrix relu
 
     @staticmethod
     def huber_func(weighted_sum):
-        pass
+        sigmoid_activation = 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+        activation = np.clip(((weighted_sum>0) * weighted_sum + sigmoid_activation), 1e-10, 1-1e-10)
+        return activation
 
+    @staticmethod
+    def huber_derivative(weighted_sum):
+        tmp = 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+        sigmoid_derivative = tmp * (1 - tmp)
+        return np.array(weighted_sum > 0, dtype=float) + (weighted_sum <= 0) * sigmoid_derivative
+
+    @staticmethod
+    def poisson_func(weighted_sum):
+        avg_fr = np.clip(np.ceil(weighted_sum), 1, 10)
+        fr = np.random.poisson(avg_fr)
+        sigmoid_activation = 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+        return sigmoid_activation * (weighted_sum < 0) + fr * (weighted_sum > 0)
+        # return fr * (weighted_sum > 0)
+
+    @staticmethod
+    def poisson_derivative(weighted_sum, upper_bound=10):
+        tmp = 1.0 / (1 + np.exp(-1.0 * weighted_sum))
+        sigmoid_derivative = tmp * (1 - tmp)
+        mask = np.logical_and(weighted_sum > 0, weighted_sum < upper_bound)
+        return mask + np.logical_not(mask) * sigmoid_derivative
 
 class Cost_Func(object):
     @staticmethod
@@ -86,12 +108,22 @@ class Network(object):
             derivative_matrix = np.array(self.derivative_func(weighted_sums))
             derivative_matrix[-1] = 0 # bias terms shouldn't contribute to the back-propagated errors
             derivative_matrix_list.append(derivative_matrix)
-
+        # un-comment if use cross-entropy cost function
+        # for the output layer, prevent it from becoming zero
+        # input_matrix = np.clip(input_matrix, 1e-10, 1 - 1e-10) # add a constant to input matrix to prevent 0
+        input_matrix[:-1, :] = 1.0 / (1 + np.exp(-1.0 * weighted_sums[:-1, :]))
+        tmp = np.exp(input_matrix[:-1, :])
+        input_matrix[:-1, :] = tmp / np.tile(tmp.sum(axis=0), (tmp.shape[0], 1)) # softmax output
+        input_matrix[-1] = 1
+        # activation_matrix_list[-1] = input_matrix
         return activation_matrix_list, derivative_matrix_list
 
     def _output_errors(self, output_activation_matrix, y_matrix, output_derivative_matrix):
-        output_error_matrix = (y_matrix / output_activation_matrix[:-1, :] -
-                               (1 - y_matrix) / (1 - output_activation_matrix[:-1, :])) * output_derivative_matrix[:-1, :]
+        # cross-entropy error
+        # output_error_matrix = -1.0 * (y_matrix / output_activation_matrix[:-1, :] -
+        #                        (1 - y_matrix) / (1 - output_activation_matrix[:-1, :])) * output_derivative_matrix[:-1, :]
+        # quadratic cost function
+        output_error_matrix = (output_activation_matrix[:-1, :] - y_matrix) * output_derivative_matrix[:-1, :]
         output_error_matrix = np.vstack((output_error_matrix, np.zeros(y_matrix.shape[1])))
         return output_error_matrix
 
@@ -117,7 +149,9 @@ class Network(object):
             self._weight_matrix_list[iii] = self._weight_matrix_list[iii] - learning_rate * avg_delta_weights - \
                                              learning_rate * regularization_strength * self._weight_matrix_list[iii]
 
-    def mini_batch_SGD(self, training_data, batch_size, learning_rate, regularization_strength, num_iteration):
+    def mini_batch_SGD(self, training_data, test_data, batch_size, learning_rate, regularization_strength, num_iteration):
+        training_accuracy_list = []
+        test_accuracy_list = []
         for idx in xrange(0, num_iteration):
             random.shuffle(training_data) # in place shuffle
             mini_batches = [training_data[k:k+batch_size] for k in xrange(0, len(training_data), batch_size)]
@@ -135,7 +169,13 @@ class Network(object):
                 output_error_matrix = self._output_errors(output_activation_matrix, y_matrix, output_derivative_matrix)
                 error_matrix_list = self._back_propagation(output_error_matrix, derivative_matrix_list)
                 self._weight_update(error_matrix_list, activation_matrix_list, learning_rate, regularization_strength)
-            print "Iteration = %d, accuracy = %f\n" % (idx+1, self.accuracy(training_data))
+            train_accuracy = self.training_accuracy(training_data)
+            test_accuracy = self.test_accuracy(test_data)
+            print "Iteration = %d, training accuracy = %f, test accuracy = %f\n" % (idx + 1, train_accuracy, test_accuracy)
+            training_accuracy_list.append(train_accuracy)
+            test_accuracy_list.append(test_accuracy)
+        return np.array([training_accuracy_list, test_accuracy_list])
+
 
     def predict(self, vectorized_digit):
         input_activation = np.append(vectorized_digit, [1]) # append a 1 to the end of vectorized input
@@ -144,7 +184,7 @@ class Network(object):
             input_activation = self.activation_func(tmp_weighted_sum)
         return np.argmax(input_activation[:-1]), input_activation
 
-    def accuracy(self, test_data):
+    def training_accuracy(self, test_data):
         correct_count = 0
         for item in test_data:
             input_vec, y_vec = item
@@ -152,15 +192,20 @@ class Network(object):
             correct_count += prediction == np.argmax(y_vec)
         return correct_count * 1.0 / len(test_data)
 
+    def test_accuracy(self, test_data):
+        correct_count = 0
+        for item in test_data:
+            input_vec, label = item
+            prediction, _ = self.predict(input_vec)
+            correct_count += prediction == label
+        return correct_count * 1.0 / len(test_data)
+
     def load_weights(self, weights_list):
         for idx, weights in enumerate(weights_list):
             self._weight_matrix_list[idx] = weights
 
     def save_weights(self, filename):
-        weights_dict = {}
-        for idx, weights in enumerate(self._weight_matrix_list):
-            weights_dict[idx] = weights
-        np.savez_compressed(filename, weights_dict)
+        np.savez_compressed(filename, self._weight_matrix_list)
 
 
 
