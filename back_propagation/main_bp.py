@@ -9,10 +9,10 @@ import time
 from mnist_loader import load_data_wrapper
 training_data, validation_data, test_data = load_data_wrapper()
 
-my_network = ann.Network([len(training_data[0][0]), 140, 30, 10, 10], normalize=True,
+my_network = ann.Network([len(training_data[0][0]), 150, 10], normalize=True,
                          activation_func=ann.Activation_Func.poisson_func,
                          derivative_func=ann.Activation_Func.poisson_derivative)
-my_network.mini_batch_SGD(training_data, test_data, 60, 1, 10**-8, 10)
+my_network.mini_batch_SGD(training_data, test_data, 60, 1, 10**-8, 60)
 # my_network.save_weights("poisson_network_weights.npz")
 
 
