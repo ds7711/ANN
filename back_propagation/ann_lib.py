@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pylab as plt
 import random
+import time
 
 
 class Activation_Func(object):
@@ -153,6 +154,7 @@ class Network(object):
         training_accuracy_list = []
         test_accuracy_list = []
         for idx in xrange(0, num_iteration):
+            st = time.time()
             random.shuffle(training_data) # in place shuffle
             mini_batches = [training_data[k:k+batch_size] for k in xrange(0, len(training_data), batch_size)]
             for mini_batch in mini_batches:
@@ -171,7 +173,10 @@ class Network(object):
                 self._weight_update(error_matrix_list, activation_matrix_list, learning_rate, regularization_strength)
             train_accuracy = self.training_accuracy(training_data)
             test_accuracy = self.test_accuracy(test_data)
-            print "Iteration = %d, training accuracy = %f, test accuracy = %f\n" % (idx + 1, train_accuracy, test_accuracy)
+            time_elapsed = time.time() - st
+            print "Iteration = %d, training accuracy = %f, " \
+                  "test accuracy = %f, time elapse = %f \n" % \
+                  (idx + 1, train_accuracy, test_accuracy, time_elapsed)
             training_accuracy_list.append(train_accuracy)
             test_accuracy_list.append(test_accuracy)
         return np.array([training_accuracy_list, test_accuracy_list])
